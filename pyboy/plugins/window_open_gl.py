@@ -3,13 +3,10 @@
 # GitHub: https://github.com/Baekalfen/PyBoy
 #
 
-import logging
-
 import numpy as np
+from pyboy.logger import logger
 from pyboy.plugins.base_plugin import PyBoyWindowPlugin
 from pyboy.utils import WindowEvent
-
-logger = logging.getLogger(__name__)
 
 try:
     import OpenGL.GLUT.freeglut
@@ -109,6 +106,8 @@ class WindowOpenGL(PyBoyWindowPlugin):
                 self.events.append(WindowEvent(WindowEvent.RELEASE_BUTTON_SELECT))
             elif c == chr(13):
                 self.events.append(WindowEvent(WindowEvent.RELEASE_BUTTON_START))
+            elif c == "o":
+                self.events.append(WindowEvent(WindowEvent.SCREENSHOT_RECORD))
         else:
             if c == "a":
                 self.events.append(WindowEvent(WindowEvent.PRESS_BUTTON_A))
@@ -151,3 +150,5 @@ class WindowOpenGL(PyBoyWindowPlugin):
 
     def stop(self):
         glutDestroyWindow(glutGetWindow())
+        for _ in range(10): # At least 2 to close
+            OpenGL.GLUT.freeglut.glutMainLoopEvent()

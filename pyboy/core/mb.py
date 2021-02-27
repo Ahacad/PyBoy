@@ -7,7 +7,7 @@ import logging
 
 from pyboy.utils import STATE_VERSION
 
-from . import bootrom, cartridge, cpu, interaction, lcd, ram, timer
+from . import bootrom, cartridge, cpu, interaction, lcd, ram, sound, timer
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,16 @@ STAT, _, _, LY, LYC = range(0xFF41, 0xFF46)
 
 
 class Motherboard:
-    def __init__(self, gamerom_file, bootrom_file, color_palette, disable_renderer, profiling=False):
+    def __init__(
+        self,
+        gamerom_file,
+        bootrom_file,
+        color_palette,
+        disable_renderer,
+        sound_enabled,
+        randomize=False,
+        profiling=False
+    ):
         if bootrom_file is not None:
             logger.info("Boot-ROM file provided")
 
@@ -27,11 +36,14 @@ class Motherboard:
         self.interaction = interaction.Interaction()
         self.cartridge = cartridge.load_cartridge(gamerom_file)
         self.bootrom = bootrom.BootROM(bootrom_file)
-        self.ram = ram.RAM(random=False)
+        self.ram = ram.RAM(randomize=randomize)
         self.cpu = cpu.CPU(self, profiling)
-        self.lcd = lcd.LCD()
+        self.lcd = lcd.LCD(randomize=randomize)
         self.renderer = lcd.Renderer(color_palette)
         self.disable_renderer = disable_renderer
+        self.sound_enabled = sound_enabled
+        if sound_enabled:
+            self.sound = sound.Sound()
         self.bootrom_enabled = True
         self.serialbuffer = ""
         self.cycles_remaining = 0
@@ -46,6 +58,8 @@ class Motherboard:
             self.cpu.set_interruptflag(HIGHTOLOW)
 
     def stop(self, save):
+        if self.sound_enabled:
+            self.sound.stop()
         if save:
             self.cartridge.stop()
 
@@ -55,8 +69,13 @@ class Motherboard:
         f.write(self.bootrom_enabled)
         self.cpu.save_state(f)
         self.lcd.save_state(f)
+        if self.sound_enabled:
+            self.sound.save_state(f)
+        else:
+            pass
         self.renderer.save_state(f)
         self.ram.save_state(f)
+        self.timer.save_state(f)
         self.cartridge.save_state(f)
         f.flush()
         logger.debug("State saved.")
@@ -74,9 +93,13 @@ class Motherboard:
             self.bootrom_enabled = state_version
         self.cpu.load_state(f, state_version)
         self.lcd.load_state(f, state_version)
+        if state_version >= 6:
+            self.sound.load_state(f, state_version)
         if state_version >= 2:
             self.renderer.load_state(f, state_version)
         self.ram.load_state(f, state_version)
+        if state_version >= 5:
+            self.timer.load_state(f, state_version)
         self.cartridge.load_state(f, state_version)
         f.flush()
         logger.debug("State loaded.")
@@ -129,6 +152,8 @@ class Motherboard:
                 if self.cpu.profiling:
                     self.cpu.hitrate[0x76] += cycles // 4
 
+            if self.sound_enabled:
+                self.sound.clock += cycles
             self.cycles_remaining -= cycles
 
             if self.timer.tick(cycles):
@@ -179,6 +204,8 @@ class Motherboard:
 
             for y in range(154):
                 self.calculate_cycles(456)
+        if self.sound_enabled:
+            self.sound.sync()
 
     ###################################################################
     # MemoryManager
@@ -213,6 +240,11 @@ class Motherboard:
                 return self.timer.TMA
             elif i == 0xFF07:
                 return self.timer.TAC
+            elif 0xFF10 <= i < 0xFF40:
+                if self.sound_enabled:
+                    return self.sound.get(i - 0xFF10)
+                else:
+                    return 0
             elif i == 0xFF40:
                 return self.lcd.LCDC.value
             elif i == 0xFF42:
@@ -278,6 +310,9 @@ class Motherboard:
                 self.timer.TMA = value
             elif i == 0xFF07:
                 self.timer.TAC = value & 0b111
+            elif 0xFF10 <= i < 0xFF40:
+                if self.sound_enabled:
+                    self.sound.set(i - 0xFF10, value)
             elif i == 0xFF40:
                 self.lcd.LCDC.set(value)
             elif i == 0xFF42:

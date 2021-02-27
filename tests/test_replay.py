@@ -13,9 +13,9 @@ import time
 import zlib
 
 import numpy as np
+import pytest
 from pyboy import PyBoy, WindowEvent
-
-from . import utils
+from tests import utils
 
 event_filter = [
     WindowEvent.PRESS_SPEED_UP,
@@ -72,7 +72,9 @@ def replay(
     rewind=False,
     bootrom_file=utils.boot_rom,
     overwrite=RESET_REPLAYS,
-    gif_hash=None
+    gif_hash=None,
+    randomize=False,
+    padding_frames=0,
 ):
     with open(replay, "rb") as f:
         recorded_input, b64_romhash, b64_state = json.loads(zlib.decompress(f.read()).decode("ascii"))
@@ -86,11 +88,15 @@ def replay(
         bootrom_file=bootrom_file,
         disable_input=True,
         rewind=rewind,
+        randomize=randomize,
         record_input=(RESET_REPLAYS and window in ["SDL2", "headless", "OpenGL"])
     )
-    # pyboy.set_emulation_speed(0)
+    pyboy.set_emulation_speed(0)
     if state_data is not None:
         pyboy.load_state(state_data)
+    else:
+        for _ in range(padding_frames):
+            pyboy.tick()
 
     # Filters out the blacklisted events
     recorded_input = list(
@@ -148,10 +154,12 @@ def replay(
     pyboy.stop(save=False)
 
 
+@pytest.mark.skipif(not utils.pokemon_blue_rom, reason="ROM not present")
 def test_pokemon():
     replay(utils.pokemon_blue_rom, "tests/replays/pokemon_blue.replay")
 
 
+@pytest.mark.skipif(not utils.pokemon_blue_rom, reason="ROM not present")
 def test_pokemon_gif1():
     replay(
         utils.pokemon_blue_rom,
@@ -162,6 +170,7 @@ def test_pokemon_gif1():
     )
 
 
+@pytest.mark.skipif(not utils.pokemon_blue_rom, reason="ROM not present")
 def test_pokemon_gif2():
     replay(
         utils.pokemon_blue_rom,
@@ -172,24 +181,29 @@ def test_pokemon_gif2():
     )
 
 
+@pytest.mark.skipif(not utils.tetris_rom, reason="ROM not present")
 def test_tetris():
     replay(utils.tetris_rom, "tests/replays/tetris.replay")
 
 
+@pytest.mark.skipif(not utils.supermarioland_rom, reason="ROM not present")
 def test_supermarioland_gif():
     replay(
         utils.supermarioland_rom,
         "tests/replays/supermarioland_gif.replay",
         record_gif=(122, 644),
         gif_destination="README/3.gif",
-        gif_hash="15aVUmwtTq38E3SB91moQLYSTZVWuTNTUmzYVSgTg38="
+        gif_hash="15aVUmwtTq38E3SB91moQLYSTZVWuTNTUmzYVSgTg38=",
+        randomize=True
     )
 
 
+@pytest.mark.skipif(not utils.supermarioland_rom, reason="ROM not present")
 def test_supermarioland():
     replay(utils.supermarioland_rom, "tests/replays/supermarioland.replay")
 
 
+@pytest.mark.skipif(not utils.kirby_rom, reason="ROM not present")
 def test_kirby():
     replay(
         utils.kirby_rom,
@@ -200,6 +214,7 @@ def test_kirby():
     )
 
 
+@pytest.mark.skipif(not utils.supermarioland_rom, reason="ROM not present")
 def test_rewind():
     replay(
         utils.supermarioland_rom,

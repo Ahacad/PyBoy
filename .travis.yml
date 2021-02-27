@@ -10,9 +10,101 @@ jobs:
   include:
     - os: linux
       dist: bionic
+
     - os: linux
       dist: bionic
-      env: PYPY_TESTING=1 pypy_version=pypy3.6-v7.3.0-linux64
+      env: PYPY_TESTING=1 pypy_version=pypy3.6-v7.3.2-linux64
+
+    - services: docker
+      env: MANYLINUX=manylinux2010_x86_64
+           PYTHON_VERSION=cp36-cp36m
+           PYPI=1
+      if: type != pull_request
+
+    - services: docker
+      env: MANYLINUX=manylinux2010_x86_64
+           PYTHON_VERSION=cp37-cp37m
+           PYPI=1
+      if: type != pull_request
+
+    - services: docker
+      env: MANYLINUX=manylinux2010_x86_64
+           PYTHON_VERSION=cp38-cp38
+           PYPI=1
+      if: type != pull_request
+
+    - os: osx
+      osx_image: xcode11.3
+      env: PYTHON_VERSION=3.6.10
+           PYPI=1
+           PYPI_SOURCE=1
+
+    - os: osx
+      osx_image: xcode11.3
+      env: PYTHON_VERSION=3.7.7
+           PYPI=1
+      if: type != pull_request
+
+    - os: osx
+      osx_image: xcode11.3
+      env: PYTHON_VERSION=3.8.2
+           PYPI=1
+      if: type != pull_request
+
+    - os: osx
+      osx_image: xcode11.3
+      env: PYPY_TESTING=1
+
+    - os: windows
+      env: MSYS=1
+      if: type != pull_request
+
+    - os: windows
+      env: PYPI=1
+           PYTHON_VERSION=3.6.8
+           PYTHON_ARCH=-amd64
+           PYTHON_PATH=36
+           SDL2_ARCH=x64
+
+    - os: windows
+      env: PYPI=1
+           PYTHON_VERSION=3.7.6
+           PYTHON_ARCH=-amd64
+           PYTHON_PATH=37
+           SDL2_ARCH=x64
+      if: type != pull_request
+    # TODO: SciPy: No lapack/blas resources found.
+    # - os: windows
+    #   env: PYPI=1
+    #        PYTHON_VERSION=3.8.2
+    #        PYTHON_ARCH=-amd64
+    #        PYTHON_PATH=38
+    #        SDL2_ARCH=x64
+    #   if: type != pull_request
+    - os: windows
+      env: PYPI=1
+           PYTHON_VERSION=3.6.8
+           PYTHON_ARCH=
+           PYTHON_PATH=36
+           SDL2_ARCH=x86
+      if: type != pull_request
+
+    - os: windows
+      env: PYPI=1
+           PYTHON_VERSION=3.7.6
+           PYTHON_ARCH=
+           PYTHON_PATH=37
+           SDL2_ARCH=x86
+      if: type != pull_request
+    # TODO: SciPy: No lapack/blas resources found.
+    # - os: windows
+    #   env: PYPI=1
+    #        PYTHON_VERSION=3.8.2
+    #        PYTHON_ARCH=
+    #        PYTHON_PATH=38
+    #        SDL2_ARCH=x86
+    #   if: type != pull_request
+
     # - services: docker
     #   env: MANYLINUX=manylinux2014_x86_64
     #        PYTHON_VERSION=cp36-cp36m
@@ -25,45 +117,15 @@ jobs:
     #   env: MANYLINUX=manylinux2014_x86_64
     #        PYTHON_VERSION=cp38-cp38
     #        PYPI=1
-    - services: docker
-      env: MANYLINUX=manylinux2010_x86_64
-           PYTHON_VERSION=cp36-cp36m
-           PYPI=1
-    - services: docker
-      env: MANYLINUX=manylinux2010_x86_64
-           PYTHON_VERSION=cp37-cp37m
-           PYPI=1
-    - services: docker
-      env: MANYLINUX=manylinux2010_x86_64
-           PYTHON_VERSION=cp38-cp38
-           PYPI=1
-    - os: osx
-      osx_image: xcode11.3
-      env: PYTHON_VERSION=3.6.10
-           PYPI=1
-           PYPI_SOURCE=1
-    - os: osx
-      osx_image: xcode11.3
-      env: PYTHON_VERSION=3.7.7
-           PYPI=1
-    - os: osx
-      osx_image: xcode11.3
-      env: PYTHON_VERSION=3.8.2
-           PYPI=1
-    - os: osx
-      osx_image: xcode11.3
-      env: PYPY_TESTING=1
-    - os: windows
-      env: MSYS=1
-    - os: windows
-      env: PYPI=1
 
 before_install:
   - |-
     case $TRAVIS_OS_NAME in
       osx)
-        openssl aes-256-cbc -K $encrypted_e987e62fd955_key -iv $encrypted_e987e62fd955_iv -in ci_secrets.tar.enc -out ci_secrets.tar -d
-        tar xf ci_secrets.tar
+        if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then
+          openssl aes-256-cbc -K $encrypted_e987e62fd955_key -iv $encrypted_e987e62fd955_iv -in ci_secrets.tar.enc -out ci_secrets.tar -d
+          tar xf ci_secrets.tar
+        fi
         # MacOS Python and PyPy
         brew update
         brew install sdl2
@@ -73,6 +135,13 @@ before_install:
           brew install pypy3 zlib
           export PKG_CONFIG_PATH="/usr/local/opt/zlib/lib/pkgconfig"
           pypy3 -m pip install wheel
+
+          #############################
+          # Fix issue with NumPy and PolyFit: https://github.com/numpy/numpy/issues/15947
+          rm -v ~/Library/Caches/pip/wheels/*/*/*/*/*numpy*
+          brew install openblas
+          OPENBLAS="$(brew --prefix openblas)" pypy3 -m pip install numpy
+          #############################
         else
           brew upgrade pyenv
           pyenv install $PYTHON_VERSION
@@ -83,8 +152,10 @@ before_install:
         fi
       ;;
       linux)
-        openssl aes-256-cbc -K $encrypted_e987e62fd955_key -iv $encrypted_e987e62fd955_iv -in ci_secrets.tar.enc -out ci_secrets.tar -d
-        tar xf ci_secrets.tar
+        if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then
+          openssl aes-256-cbc -K $encrypted_e987e62fd955_key -iv $encrypted_e987e62fd955_iv -in ci_secrets.tar.enc -out ci_secrets.tar -d
+          tar xf ci_secrets.tar
+        fi
         if [ "$MANYLINUX" ]; then
           echo "ManyLinux"
           docker pull "quay.io/pypa/$MANYLINUX"
@@ -105,7 +176,7 @@ before_install:
           sudo apt update
           sudo apt install -y libsdl2-dev libtiff5-dev libjpeg8-dev zlib1g-dev curl
           # Linux PyPy
-          curl -OL "https://bitbucket.org/pypy/pypy/downloads/$pypy_version.tar.bz2"
+          curl -OL "https://downloads.python.org/pypy/$pypy_version.tar.bz2"
           tar -xvf "${pypy_version}.tar.bz2" -C $HOME/
           export PATH=$HOME/$pypy_version/bin:$PATH
           pypy3 -m ensurepip
@@ -118,8 +189,11 @@ before_install:
         fi
       ;;
       windows)
-        $mingw64 openssl aes-256-cbc -K $encrypted_e987e62fd955_key -iv $encrypted_e987e62fd955_iv -in ci_secrets.tar.enc -out ci_secrets.tar -d
-        $mingw64 tar xf ci_secrets.tar
+        if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then
+          $mingw64 openssl aes-256-cbc -K $encrypted_e987e62fd955_key -iv $encrypted_e987e62fd955_iv -in ci_secrets.tar.enc -out ci_secrets.tar -d
+          $mingw64 tar xf ci_secrets.tar
+        fi
+
         if [ "$MSYS" = "1" ]; then
           [[ ! -f C:/tools/msys64/msys2_shell.cmd ]] && rm -rf C:/tools/msys64
           choco uninstall -y mingw
@@ -136,12 +210,12 @@ before_install:
           export MAKE=mingw32-make  # so that Autotools can find it
           $mingw64 pacman -S --noconfirm make mingw-w64-x86_64-gcc mingw-w64-x86_64-SDL2 mingw-w64-x86_64-python3 mingw-w64-x86_64-python3-pip mingw-w64-x86_64-python3-numpy mingw-w64-x86_64-python3-pillow git
         else
-          powershell -Command "(New-Object Net.WebClient).DownloadFile('https://www.python.org/ftp/python/3.7.6/python-3.7.6-amd64.exe', 'python-3.7.6-amd64.exe')"
-          powershell -Command "start-Process -FilePath python-3.7.6-amd64.exe -ArgumentList '/quiet','InstallAllUsers=1','PrependPath=1' -wait"
+          powershell -Command "(New-Object Net.WebClient).DownloadFile('https://www.python.org/ftp/python/$PYTHON_VERSION/python-$PYTHON_VERSION$PYTHON_ARCH.exe', 'python-$PYTHON_VERSION$PYTHON_ARCH.exe')"
+          powershell -Command "start-Process -FilePath python-$PYTHON_VERSION$PYTHON_ARCH.exe -ArgumentList '/quiet','InstallAllUsers=1','PrependPath=1' -wait"
           powershell -Command "(New-Object Net.WebClient).DownloadFile('https://www.libsdl.org/release/SDL2-devel-2.0.10-VC.zip', 'SDL2-devel-2.0.10-VC.zip')"
           powershell -Command "Expand-Archive -Force 'SDL2-devel-2.0.10-VC.zip' C:\\SDL2\\"
-          powershell -Command "setx PYSDL2_DLL_PATH C:\\SDL2\\SDL2-2.0.10\\lib\\x64"
-          powershell -Command "setx PATH \"%PATH%;C:\\SDL2\\SDL2-2.0.10\\lib\\x64\""
+          powershell -Command "setx PYSDL2_DLL_PATH C:\\SDL2\\SDL2-2.0.10\\lib\\$SDL2_ARCH"
+          powershell -Command "setx PATH \"%PATH%;C:\\SDL2\\SDL2-2.0.10\\lib\\$SDL2_ARCH\""
         fi
       ;;
     esac
@@ -156,9 +230,22 @@ install:
           ;;
           *)
             # The paths are weird, because we are actually running in Git Bash. Windwows support is still a little beta
-            export PYSDL2_DLL_PATH=/c/SDL2/SDL2-2.0.10/lib/x64
-            export PATH="${PATH}:/c/SDL2/SDL2-2.0.10/lib/x64"
-            /c/Program\ Files/Python37/python.exe setup.py build_ext --inplace
+            export PYSDL2_DLL_PATH=/c/SDL2/SDL2-2.0.10/lib/$SDL2_ARCH
+            export PATH="${PATH}:/c/SDL2/SDL2-2.0.10/lib/$SDL2_ARCH"
+
+            case $SDL2_ARCH in
+              x64)
+                # /c/Users/Mads/AppData/Local/Programs/Python/Python38/python.exe
+                /c/Program\ Files/Python$PYTHON_PATH/python.exe -m pip install --upgrade pip
+                /c/Program\ Files/Python$PYTHON_PATH/python.exe -m pip install --upgrade Pillow numpy
+                /c/Program\ Files/Python$PYTHON_PATH/python.exe setup.py build_ext --inplace
+              ;;
+              x86)
+                /c/Program\ Files\ \(x86\)/Python$PYTHON_PATH-32/python.exe -m pip install --upgrade pip
+                /c/Program\ Files\ \(x86\)/Python$PYTHON_PATH-32/python.exe -m pip install --upgrade Pillow numpy
+                /c/Program\ Files\ \(x86\)/Python$PYTHON_PATH-32/python.exe setup.py build_ext --inplace
+              ;;
+            esac
           ;;
         esac
       ;;
@@ -181,7 +268,14 @@ script:
             TEST_CI=1 TEST_NO_UI=1 $mingw64 make test_cython
           ;;
           *)
-            PYSDL2_DLL_PATH=/c/SDL2/SDL2-2.0.10/lib/x64 PATH="${PATH};/c/SDL2/SDL2-2.0.10/lib/x64" TEST_CI=1 TEST_NO_UI=1 /c/Program\ Files/Python37/python.exe setup.py test
+            case $SDL2_ARCH in
+              x64)
+                PYSDL2_DLL_PATH="/c/SDL2/SDL2-2.0.10/lib/$SDL2_ARCH" PATH="${PATH};/c/SDL2/SDL2-2.0.10/lib/$SDL2_ARCH" TEST_CI=1 TEST_NO_UI=1 /c/Program\ Files/Python$PYTHON_PATH/python.exe setup.py test
+              ;;
+              x86)
+                PYSDL2_DLL_PATH="/c/SDL2/SDL2-2.0.10/lib/$SDL2_ARCH" PATH="${PATH};/c/SDL2/SDL2-2.0.10/lib/$SDL2_ARCH" TEST_CI=1 TEST_NO_UI=1 /c/Program\ Files\ \(x86\)/Python$PYTHON_PATH-32/python.exe setup.py test
+              ;;
+            esac
           ;;
         esac
       ;;
@@ -200,7 +294,7 @@ script:
 deploy:
   - provider: script
     skip_cleanup: true
-    script: bash -c 'if [ "$MANYLINUX" ]; then docker exec -e PYPI_TOKEN=$PYPI_TOKEN -e PYPI_TOKEN_TEST=$PYPI_TOKEN_TEST -e MANYLINUX=$MANYLINUX -e DOCKER_HUB_BUILD_POST=$DOCKER_HUB_BUILD_POST -e PYPI_SOURCE=$PYPI_SOURCE manylinux bash .deploy.sh; else bash .deploy.sh; fi'
+    script: bash -c 'if [ "$MANYLINUX" ]; then docker exec -e PYPI_TOKEN=$PYPI_TOKEN -e PYPI_TOKEN_TEST=$PYPI_TOKEN_TEST -e MANYLINUX=$MANYLINUX -e DOCKER_HUB_BUILD_POST=$DOCKER_HUB_BUILD_POST -e PYPI_SOURCE=$PYPI_SOURCE -e PYTHON_PATH=$PYTHON_PATH -e SDL2_ARCH=$SDL2_ARCH manylinux bash .deploy.sh; else bash .deploy.sh; fi'
     on:
       branch: master
       tags: true

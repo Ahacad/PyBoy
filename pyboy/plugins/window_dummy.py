@@ -2,11 +2,9 @@
 # License: See LICENSE.md file
 # GitHub: https://github.com/Baekalfen/PyBoy
 #
-import logging
 
+from pyboy.logger import logger
 from pyboy.plugins.base_plugin import PyBoyWindowPlugin
-
-logger = logging.getLogger(__name__)
 
 
 class WindowDummy(PyBoyWindowPlugin):
@@ -22,4 +20,4 @@ class WindowDummy(PyBoyWindowPlugin):
         return self.pyboy_argv.get("window_type") == "dummy"
 
     def set_title(self, title):
-        logger.info(title.encode())
+        logger.info(title)

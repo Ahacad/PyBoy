@@ -13,10 +13,12 @@ from pathlib import Path
 from setuptools import Extension, find_packages, setup
 from setuptools.command.test import test
 
+from tests.utils import kirby_rom, supermarioland_rom, tetris_rom
+
 # The requirements.txt file will not be included in the PyPi package
 REQUIREMENTS = """\
 # Change in setup.py
-cython; platform_python_implementation == 'CPython'
+cython>=0.29.16; platform_python_implementation == 'CPython'
 numpy
 pillow
 pysdl2
@@ -32,19 +34,25 @@ def load_requirements(filename):
 
 requirements = load_requirements("requirements.txt")
 
+MSYS = os.getenv("MSYS")
 CYTHON = platform.python_implementation() != "PyPy"
 
 if CYTHON:
     # "Recommended" method of installing Cython: https://github.com/pypa/pip/issues/5761
     from setuptools import dist
-    dist.Distribution().fetch_build_eggs(["cython"])
+    dist.Distribution().fetch_build_eggs(["cython>=0.29.16"])
 
     from Cython.Build import cythonize
     import Cython.Compiler.Options
     from Cython.Distutils import build_ext
 else:
     try:
-        requirements.remove("cython")
+        for r in requirements:
+            if "cython" in r:
+                break
+        else:
+            r = None
+        requirements.remove(r)
     except ValueError:
         pass
 
@@ -81,21 +89,23 @@ class PyTest(test):
             script_path = os.path.dirname(os.path.realpath(__file__))
             base = Path(f"{script_path}/examples/")
 
-            tetris_script = base / f"gamewrapper_tetris.py"
-            tetris_rom = Path(f"{script_path}/ROMs/Tetris.gb")
-            return_code = subprocess.Popen([sys.executable, str(tetris_script), str(tetris_rom), "--quiet"]).wait()
-            if return_code != 0:
-                sys.exit(return_code)
+            for gamewrapper, rom in [
+                ("gamewrapper_tetris.py", tetris_rom),
+                ("gamewrapper_mario.py", supermarioland_rom),
+                ("gamewrapper_kirby.py", kirby_rom),
+            ]:
+                if rom is None:
+                    continue
 
-            mario_script = base / f"gamewrapper_mario.py"
-            mario_rom = Path(f"{script_path}/ROMs/SuperMarioLand.gb")
-            return_code = subprocess.Popen([sys.executable, str(mario_script), str(mario_rom), "--quiet"]).wait()
-            if return_code != 0:
-                sys.exit(return_code)
+                return_code = subprocess.Popen([sys.executable,
+                                                str(base / gamewrapper),
+                                                str(Path(rom)), "--quiet"]).wait()
+                if return_code != 0:
+                    sys.exit(return_code)
 
         import pytest
         args = ["tests/", f"-n{cpu_count()}", "-v", "--dist=loadfile"]
-        # args = ["tests/", "-v", "-x"]
+        # args = ["tests/", "-v", "-x"] # No multithreading, fail fast
         if codecov: # TODO: There's probably a more correct way to read the argv flags
             args += ["--cov=./"]
         sys.exit(pytest.main(args))
@@ -250,7 +260,7 @@ if CYTHON and "clean" not in sys.argv:
         nthreads=thread_count,
         annotate=False,
         gdb_debug=False,
-        language_level=2,
+        language_level=3,
         compiler_directives={
             "boundscheck": False,
             "cdivision": True,
@@ -274,7 +284,7 @@ except FileNotFoundError:
 
 setup(
     name="pyboy",
-    version="1.0.1",
+    version="1.3.0",
     packages=find_packages(),
     author="Mads Ynddal",
     author_email="mads-pyboy@ynddal.dk",
@@ -299,15 +309,17 @@ setup(
     },
     install_requires=requirements,
     tests_require=[
-        "pytest",
+        "pytest>=6.0.0",
         "pytest-xdist",
         "pyopengl",
+        "gym" if CYTHON and not MSYS else "",
     ],
     extras_require={
         "all": [
             "pyopengl",
             "markdown",
             "pdoc3",
+            "gym" if CYTHON and not MSYS else "",
         ],
     },
     zip_safe=(not CYTHON), # Cython doesn't support it

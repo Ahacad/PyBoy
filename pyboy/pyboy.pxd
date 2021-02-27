@@ -11,8 +11,6 @@ from pyboy.core.mb cimport Motherboard
 from pyboy.utils cimport IntIOWrapper, IntIOInterface
 from pyboy.plugins.manager cimport PluginManager
 
-cdef (int, int) _dummy_declaration
-cdef (int, int, int, int) _dummy_declaration2
 
 cdef float SPF
 
@@ -27,8 +25,10 @@ cdef class PyBoy:
     cdef double avg_tick
     cdef double avg_post
 
+    cdef list old_events
     cdef list events
-    cdef bint done
+    cdef bint quitting
+    cdef bint stopped
     cdef public str window_title
 
     cdef bint limit_emulationspeed
@@ -43,5 +43,3 @@ cdef class PyBoy:
     @cython.locals(done=cython.bint, event=int, t_start=float, t_cpu=float, t_emu=float, secs=float)
     cpdef bint tick(self)
     cpdef void stop(self, save=*)
-
-

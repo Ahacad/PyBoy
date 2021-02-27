@@ -6,17 +6,17 @@
 The core module of the emulator
 """
 
-import logging
 import os
 import time
 
+from pyboy.logger import logger
+from pyboy.openai_gym import PyBoyGymEnv
+from pyboy.openai_gym import enabled as gym_enabled
 from pyboy.plugins.manager import PluginManager
 from pyboy.utils import IntIOWrapper, WindowEvent
 
 from . import botsupport
 from .core.mb import Motherboard
-
-logger = logging.getLogger(__name__)
 
 SPF = 1 / 60. # inverse FPS (frame-per-second)
 
@@ -28,7 +28,17 @@ defaults = {
 
 
 class PyBoy:
-    def __init__(self, gamerom_file, *, bootrom_file=None, profiling=False, disable_renderer=False, **kwargs):
+    def __init__(
+        self,
+        gamerom_file,
+        *,
+        bootrom_file=None,
+        profiling=False,
+        disable_renderer=False,
+        sound=False,
+        randomize=False,
+        **kwargs
+    ):
         """
         PyBoy is loadable as an object in Python. This means, it can be initialized from another script, and be
         controlled and probed by the script. It is supported to spawn multiple emulators, just instantiate the class
@@ -62,7 +72,13 @@ class PyBoy:
         self.gamerom_file = gamerom_file
 
         self.mb = Motherboard(
-            gamerom_file, bootrom_file, kwargs["color_palette"], disable_renderer, profiling=profiling
+            gamerom_file,
+            bootrom_file,
+            kwargs["color_palette"],
+            disable_renderer,
+            sound,
+            randomize=randomize,
+            profiling=profiling,
         )
 
         # Performance measures
@@ -76,7 +92,9 @@ class PyBoy:
         self.set_emulation_speed(1)
         self.paused = False
         self.events = []
-        self.done = False
+        self.old_events = []
+        self.quitting = False
+        self.stopped = False
         self.window_title = "PyBoy"
 
         ###################
@@ -94,6 +112,8 @@ class PyBoy:
 
         _Open an issue on GitHub if you need finer control, and we will take a look at it._
         """
+        if self.stopped:
+            return True
 
         t_start = time.perf_counter() # Change to _ns when PyPy supports it
         self._handle_events(self.events)
@@ -114,15 +134,14 @@ class PyBoy:
         secs = t_post - t_tick
         self.avg_post = 0.9 * self.avg_post + 0.1*secs
 
-        return self.done
+        return self.quitting
 
     def _handle_events(self, events):
         # This feeds events into the tick-loop from the window. There might already be events in the list from the API.
         events = self.plugin_manager.handle_events(events)
-
         for event in events:
             if event == WindowEvent.QUIT:
-                self.done = True
+                self.quitting = True
             elif event == WindowEvent.RELEASE_SPEED_UP:
                 # Switch between unlimited and 1x real-time emulation speed
                 self.target_emulationspeed = int(bool(self.target_emulationspeed) ^ True)
@@ -177,6 +196,7 @@ class PyBoy:
         self.plugin_manager.frame_limiter(self.target_emulationspeed)
 
         # Prepare an empty list, as the API might be used to send in events between ticks
+        self.old_events = self.events
         self.events = []
 
     def _update_window_title(self):
@@ -199,11 +219,13 @@ class PyBoy:
             save (bool): Specify whether to save the game upon stopping. It will always be saved in a file next to the
                 provided game-ROM.
         """
-        logger.info("###########################")
-        logger.info("# Emulator is turning off #")
-        logger.info("###########################")
-        self.plugin_manager.stop()
-        self.mb.stop(save)
+        if not self.stopped:
+            logger.info("###########################")
+            logger.info("# Emulator is turning off #")
+            logger.info("###########################")
+            self.plugin_manager.stop()
+            self.mb.stop(save)
+            self.stopped = True
 
     def _cpu_hitrate(self):
         return self.mb.cpu.hitrate
@@ -221,6 +243,37 @@ class PyBoy:
             The manager, which gives easier access to the emulated game through the classes in `pyboy.botsupport`.
         """
         return botsupport.BotSupportManager(self, self.mb)
+
+    def openai_gym(self, observation_type="tiles", action_type="press", simultaneous_actions=False, **kwargs):
+        """
+        For Reinforcement learning, it is often easier to use the standard gym environment. This method will provide one.
+        This function requires PyBoy to implement a Game Wrapper for the loaded ROM. You can find the supported games in pyboy.plugins.
+        Additional kwargs are passed to the start_game method of the game_wrapper.
+
+        Args:
+            observation_type (str): Define what the agent will be able to see:
+            * `"raw"`: Gives the raw pixels color
+            * `"tiles"`:  Gives the id of the sprites in 8x8 pixel zones of the game_area defined by the game_wrapper.
+            * `"compressed"`: Gives a more detailled but heavier representation than `"minimal"`.
+            * `"minimal"`: Gives a minimal representation defined by the game_wrapper (recommended).
+
+            action_type (str): Define how the agent will interact with button inputs
+            * `"press"`: The agent will only press inputs for 1 frame an then release it.
+            * `"toggle"`: The agent will toggle inputs, first time it press and second time it release.
+            * `"all"`: The agent have acces to all inputs, press and release are separated.
+
+            simultaneous_actions (bool): Allow to inject multiple input at once. This dramatically increases the action_space: \\(n \\rightarrow 2^n\\)
+
+        Returns
+        -------
+        `pyboy.openai_gym.PyBoyGymEnv`:
+            A Gym environment based on the `Pyboy` object.
+        """
+        if gym_enabled:
+            return PyBoyGymEnv(self, observation_type, action_type, simultaneous_actions, **kwargs)
+        else:
+            logger.error(f"{__name__}: Missing dependency \"gym\". ")
+            return None
 
     def game_wrapper(self):
         """
@@ -255,15 +308,39 @@ class PyBoy:
         """
         Write one byte to a given memory address of the Game Boy's current memory state.
 
-        This will not directly give you access to all switchable memory banks. Open an issue on GitHub if that is
-        needed, or use this function to send "Memory Bank Controller" (MBC) commands to the virtual cartridge. You can
-        read about the MBC at [Pan Docs](http://bgb.bircd.org/pandocs.htm).
+        This will not directly give you access to all switchable memory banks.
+
+        __NOTE:__ This function will not let you change ROM addresses (0x0000 to 0x8000). If you write to these
+        addresses, it will send commands to the "Memory Bank Controller" (MBC) of the virtual cartridge. You can read
+        about the MBC at [Pan Docs](http://bgb.bircd.org/pandocs.htm).
+
+        If you need to change ROM values, see `pyboy.PyBoy.override_memory_value`.
 
         Args:
             addr (int): Address to write the byte
             value (int): A byte of data
         """
         self.mb.setitem(addr, value)
+
+    def override_memory_value(self, rom_bank, addr, value):
+        """
+        Override one byte at a given memory address of the Game Boy's ROM.
+
+        This will let you override data in the ROM at any given bank. This is the memory allocated at 0x0000 to 0x8000, where 0x4000 to 0x8000 can be changed from the MBC.
+
+        __NOTE__: Any changes here are not saved or loaded to game states! Use this function with caution and reapply
+        any overrides when reloading the ROM.
+
+        If you need to change a RAM address, see `pyboy.PyBoy.set_memory_value`.
+
+        Args:
+            rom_bank (int): ROM bank to do the overwrite in
+            addr (int): Address to write the byte inside the ROM bank
+            value (int): A byte of data
+        """
+        # TODO: If you change a RAM value outside of the ROM banks above, the memory value will stay the same no matter
+        # what the game writes to the address. This can be used so freeze the value for health, cash etc.
+        self.mb.cartridge.overrideitem(rom_bank, addr, value)
 
     def send_input(self, event):
         """
@@ -275,6 +352,29 @@ class PyBoy:
             event (pyboy.WindowEvent): The event to send
         """
         self.events.append(WindowEvent(event))
+
+    def get_input(
+        self,
+        ignore=(
+            WindowEvent.PASS, WindowEvent._INTERNAL_TOGGLE_DEBUG, WindowEvent._INTERNAL_RENDERER_FLUSH,
+            WindowEvent._INTERNAL_MOUSE, WindowEvent._INTERNAL_MARK_TILE
+        )
+    ):
+        """
+        Get current inputs except the events specified in "ignore" tuple.
+        This is both Game Boy buttons and emulator controls.
+
+        See `pyboy.WindowEvent` for which events to get.
+
+        Args:
+            ignore (tuple): Events this function should ignore
+
+        Returns
+        -------
+        list:
+            List of the `pyboy.utils.WindowEvent`s processed for the last call to `pyboy.PyBoy.tick`
+        """
+        return [x for x in self.old_events if x not in ignore]
 
     def save_state(self, file_like_object):
         """
@@ -362,3 +462,9 @@ class PyBoy:
             Game title
         """
         return self.mb.cartridge.gamename
+
+    def _rendering(self, value):
+        """
+        Disable or enable rendering
+        """
+        self.mb.disable_renderer = not value

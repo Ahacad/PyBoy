@@ -5,17 +5,14 @@
 #
 
 import argparse
-import logging
 import os
 
 from pyboy import PyBoy, core
-from pyboy.logger import log_level
+from pyboy.logger import log_level, logger
 from pyboy.plugins.manager import parser_arguments
 from pyboy.pyboy import defaults
 
 INTERNAL_LOADSTATE = "INTERNAL_LOADSTATE_TOKEN"
-
-logger = logging.getLogger(__name__)
 
 
 def color_tuple(string):
@@ -38,6 +35,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument("ROM", type=valid_file_path, help="Path to a Game Boy compatible ROM file")
 parser.add_argument("-b", "--bootrom", type=valid_file_path, help="Path to a boot-ROM file")
 parser.add_argument("--profiling", action="store_true", help="Enable opcode profiling (internal use)")
+parser.add_argument("--randomize-ram", action="store_true", help="Randomize Game Boy RAM on startup")
 parser.add_argument(
     "--log-level",
     default="INFO",
@@ -74,6 +72,7 @@ parser.add_argument(
 )
 parser.add_argument("-s", "--scale", default=defaults["scale"], type=int, help="The scaling multiplier for the window")
 parser.add_argument("--disable-renderer", action="store_true", help="Disables screen rendering for higher performance")
+parser.add_argument("--sound", action="store_true", help="Enable sound (beta)")
 
 for arguments in parser_arguments():
     for a in arguments:
@@ -111,8 +110,13 @@ The other controls for the emulator:
 | Z            | Save state              |
 | X            | Load state              |
 | I            | Toggle screen recording |
+| O            | Save screenshot         |
 | ,            | Rewind backwards        |
 | .            | Rewind forward          |
+| J            | Memory Window + 0x100   |
+| K            | Memory Window - 0x100   |
+| Shift + J    | Memory Window + 0x1000  |
+| Shift + K    | Memory Window - 0x1000  |
 
 See "pyboy --help" for how to enable rewind and other awesome features!
 """

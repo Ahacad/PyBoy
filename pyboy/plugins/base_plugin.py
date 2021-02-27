@@ -13,6 +13,7 @@ __pdoc__ = {
 
 import io
 import logging
+import random
 from array import array
 
 import numpy as np
@@ -122,21 +123,49 @@ class PyBoyGameWrapper(PyBoyPlugin):
     def post_tick(self):
         raise NotImplementedError("post_tick not implemented in game wrapper")
 
-    def start_game(self):
+    def _set_timer_div(self, timer_div):
+        if timer_div is None:
+            self.mb.timer.DIV = random.getrandbits(8)
+        else:
+            self.mb.timer.DIV = timer_div & 0xFF
+
+    def start_game(self, timer_div=None):
         """
         Call this function right after initializing PyBoy. This will navigate through menus to start the game at the
         first playable state.
 
+        A value can be passed to set the timer's DIV register. Some games depend on it for randomization.
+
         The state of the emulator is saved, and using `reset_game`, you can get back to this point of the game
         instantly.
-        """
-        raise NotImplementedError("start_game not implemented in game wrapper")
 
-    def reset_game(self):
+        Args:
+            timer_div (int): Replace timer's DIV register with this value. Use `None` to randomize.
+        """
+
+        if not self.pyboy.frame_count == 0:
+            logger.warning("Calling start_game from an already running game. This might not work.")
+
+    def reset_game(self, timer_div=None):
         """
         After calling `start_game`, you can call this method at any time to reset the game.
+
+        Args:
+            timer_div (int): Replace timer's DIV register with this value. Use `None` to randomize.
         """
-        raise NotImplementedError("reset_game not implemented in game wrapper")
+
+        if self.game_has_started:
+            self.saved_state.seek(0)
+            self.pyboy.load_state(self.saved_state)
+            self.post_tick()
+        else:
+            logger.error("Tried to reset game, but it hasn't been started yet!")
+
+    def game_over(self):
+        """
+        After calling `start_game`, you can call this method at any time to know if the game is over.
+        """
+        raise NotImplementedError("game_over not implemented in game wrapper")
 
     def _sprites_on_screen(self):
         if self._sprite_cache_invalid:
@@ -193,6 +222,26 @@ class PyBoyGameWrapper(PyBoyPlugin):
             if 0 <= _y < height and 0 <= _x < width:
                 tiles_matrix[_y][_x] = s.tile_identifier
         return tiles_matrix
+
+    def _game_area_np(self, observation_type="tiles"):
+        if observation_type == "tiles":
+            return np.asarray(self.game_area(), dtype=np.uint16)
+        elif observation_type == "compressed":
+            try:
+                return self.tiles_compressed[np.asarray(self.game_area(), dtype=np.uint16)]
+            except AttributeError:
+                raise AttributeError(
+                    f"Game wrapper miss the attribute tiles_compressed for observation_type : {observation_type}"
+                )
+        elif observation_type == "minimal":
+            try:
+                return self.tiles_minimal[np.asarray(self.game_area(), dtype=np.uint16)]
+            except AttributeError:
+                raise AttributeError(
+                    f"Game wrapper miss the attribute tiles_minimal for observation_type : {observation_type}"
+                )
+        else:
+            raise ValueError(f"Invalid observation_type : {observation_type}")
 
     def _sum_number_on_screen(self, x, y, length, blank_tile_identifier, tile_identifier_offset):
         number = 0
